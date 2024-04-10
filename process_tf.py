@@ -9,17 +9,21 @@ from json import load
 dbs_by_owner = defaultdict(list)
 TFSTATE = 'terraform.tfstate'
 
-cluster_types = ['yandex_mdb_postgresql_cluster', 'yandex_mdb_mysql_cluster']
+cluster_types = ['yandex_mdb_postgresql_cluster', 'yandex_mdb_mysql_cluster', 'yandex_mdb_mongodb_cluster']
 
 db_resource_by_cluster_type = {
     'yandex_mdb_postgresql_cluster': 'yandex_mdb_postgresql_database',
     'yandex_mdb_mysql_cluster': 'yandex_mdb_mysql_database',
+    'yandex_mdb_mongodb_cluster': 'yandex_mdb_mongodb_database',
 }
 
 user_resource_by_cluster_type = {
     'yandex_mdb_postgresql_cluster': 'yandex_mdb_postgresql_user',
     'yandex_mdb_mysql_cluster': 'yandex_mdb_mysql_user',
+    'yandex_mdb_mongodb_cluster': 'yandex_mdb_mongodb_user',
 }
+
+
 
 
 def get_args():
@@ -80,8 +84,10 @@ def prepare_db(db_lines, cluster_resource_type, cluster_resource_name):
             continue
         new_db_lines.append(db_lines[i])
         i += 1
-    if not db_name or not db_owner:
-        raise Exception(f"Can not find out db name/owner in {cluster_resource_type} {cluster_resource_name}")
+    if not db_name:
+        raise Exception(f"Can not find out db name in {cluster_resource_type} {cluster_resource_name}")
+    if cluster_resource_type != "yandex_mdb_mongodb_cluster" and not db_owner:
+        raise Exception(f"Can not find out db owner in {cluster_resource_type} {cluster_resource_name}")
     resource_type = db_resource_by_cluster_type.get(cluster_resource_type, 'unknown_db_resource')
     resource_name = f'{cluster_resource_name}-{db_name}'
     db_lines[0] = f'resource "{resource_type}" "{resource_name}" {{'
@@ -271,7 +277,7 @@ def print_tf_commands(source_file, new_resources):
         if not cluster_id:
             print(f'{cluster_type} {cluster_name} id is not found for new resource {resource_type}.{resource_name}')
             continue
-        commands.append(f'terraform import {resource_type} {cluster_id}:{name}')
+        commands.append(f'terraform import {resource_type}.{resource_name} {cluster_id}:{name}')
     print('Terraform commands to apply changes:')
     print('\n'.join(commands))
 
