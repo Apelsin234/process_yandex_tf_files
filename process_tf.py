@@ -1,5 +1,5 @@
 #!/usr/bin/python
-
+import json
 from argparse import ArgumentParser
 from collections import defaultdict
 from os import listdir
@@ -24,12 +24,11 @@ user_resource_by_cluster_type = {
 }
 
 
-
-
 def get_args():
     parser = ArgumentParser()
     parser.add_argument('-s', '--source-directory', type=str, help="Name of the source directory with .tf files")
-    parser.add_argument('--suffix', type=str, help="Suffix of generated .tf files")
+    parser.add_argument('--suffix', type=str, help="Suffix of generated files")
+    parser.add_argument('-i', '--inplace', type=bool, help="Change files inplace, ignore `suffix`")
 
     return parser.parse_args()
 
@@ -255,12 +254,12 @@ def process_directory(source_dir, suffix):
             print(f'Failed to process file {source_dir + file}\n{exc}')
     return new_resources
 
-
-def print_tf_commands(source_file, new_resources):
+def print_tf_commands(source_file, new_resources, suffix):
     with open(source_file, 'r') as tfstate:
         state = load(tfstate)
     cluster_ids = dict()
-    for resource in state.get('resources', []):
+    resources = state.get('resources', [])
+    for resource in resources:
         type = resource.get('type', None)
         name = resource.get('name', None)
         id = None
@@ -269,8 +268,12 @@ def print_tf_commands(source_file, new_resources):
         for instance in resource['instances']:
             if 'attributes' in instance and 'id' in instance['attributes']:
                 id = instance['attributes']['id']
+                instance['attributes']['database'] = []
+                instance['attributes']['user'] = []
                 break
+
         cluster_ids[(type, name)] = id
+
     commands = []
     for cluster_type, cluster_name, resource_type, resource_name, name in new_resources:
         cluster_id = cluster_ids.get((cluster_type, cluster_name))
@@ -278,8 +281,19 @@ def print_tf_commands(source_file, new_resources):
             print(f'{cluster_type} {cluster_name} id is not found for new resource {resource_type}.{resource_name}')
             continue
         commands.append(f'terraform import {resource_type}.{resource_name} {cluster_id}:{name}')
+
+    split = source_file.rsplit('.', 1)
+    with open(f'{split[0]}{suffix}.{split[1]}', 'w') as tfstate:
+        state['resources'] = resources
+        json.dump(state, tfstate)
+
     print('Terraform commands to apply changes:')
     print('\n'.join(commands))
+
+def enrich_attributes(db, cluster_id):
+    db['cluster_id'] = cluster_id
+    db['id'] = f'{cluster_id}:{db["name"]}'
+    return db
 
 
 if __name__ == '__main__':
@@ -287,6 +301,11 @@ if __name__ == '__main__':
     source_dir = args.source_directory
     if source_dir[-1] != '/':
         source_dir += '/'
+    if args.inplace:
+        args.suffix = ""
+    elif not args.suffix:
+        raise "`suffix` or `inplace` must be specified"
+
     new_resources = process_directory(source_dir, args.suffix)
-    print_tf_commands(source_dir + TFSTATE, new_resources)
+    print_tf_commands(source_dir + TFSTATE, new_resources, args.suffix)
     print('Done')
